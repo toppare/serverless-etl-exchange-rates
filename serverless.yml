@@ -1,0 +1,128 @@
+# serverless.yml
+service: baran-exchange-rates
+
+package:
+  individually: true
+  exclude:
+    - ./**
+
+provider:
+  name: aws
+  runtime: python3.6
+  memorySize: 128
+  timeout: 300
+  stage: dev
+  deploymentBucket: hausmeister-deployments
+  versionFunctions: false
+  environment:
+    SLS_STAGE: ${opt:stage, self:provider.stage}
+    SLS_SERVICE: ${self:service}
+    PYTHONPATH: /var/runtime:/var/task/lib
+    
+functions:
+  extractor:
+    handler: extractor.main
+    description: extract the currency at a given date
+    runtime: python3.6
+    role: ExtractorExecutionRole
+    reservedConcurrency: 5
+    package: 
+      include:
+        - extractor.py
+        - lib/**
+        - utils.py
+  transformer:
+    handler: transformer.main
+    description: transform the json data and load again 
+    runtime: python3.6
+    role: TransformerRole
+    reservedConcurrency: 5
+    package: 
+      include:
+        - transformer.py
+        - lib/**
+        - utils.py
+  loader:
+    handler: loader.main
+    description: load the data from s3 to redshift
+    runtime: python3.6
+    role: LoaderRole
+    reservedConcurrency: 5
+    package: 
+      include:
+        - loader.py
+        - lib/**
+        - utils.py
+
+resources:
+  Resources:
+
+    ExtractorExecutionRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - sts:AssumeRole
+              Principal:
+                Service:
+                  - lambda.amazonaws.com
+        Policies:
+          - PolicyName: WriteS3
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                Effect: Allow
+                Action:
+                - s3:PutObject*
+                Resource:
+                - 'arn:aws:s3:::hausmeister-sources/stage=dev/service=currency-etl-baran/*'
+
+    TransformerRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - sts:AssumeRole
+              Principal:
+                Service:
+                  - lambda.amazonaws.com
+        Policies:
+          - PolicyName: WriteReadS3
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                Effect: Allow
+                Action:
+                - s3:PutObject*
+                - s3:GetObject*
+                Resource:
+                - 'arn:aws:s3:::hausmeister-sources/stage=dev/service=currency-etl-baran/*'
+
+    LoaderRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - sts:AssumeRole
+              Principal:
+                Service:
+                  - lambda.amazonaws.com
+        Policies:
+          - PolicyName: ReadS3
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                Effect: Allow
+                Action:
+                - s3:GetObject*
+                Resource:
+                - 'arn:aws:s3:::hausmeister-sources/stage=dev/service=currency-etl-baran/*'
